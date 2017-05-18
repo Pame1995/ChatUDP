@@ -1,0 +1,129 @@
+package ec.edu.epn.redes.broadcast;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.util.HashSet;
+
+public class ChatServer {
+
+	private static final int PORT = 9001;
+
+	/**
+	 * The set of all names of clients in the chat room.  Maintained
+	 * so that we can check that new clients are not registering name
+	 * already in use.
+	 */
+	private static HashSet<String> names = new HashSet<String>();
+
+	/**
+	 * The set of all the print writers for all the clients.  This
+	 * set is kept so we can easily broadcast messages.
+	 */
+	private static HashSet<PrintWriter> writers = new HashSet<PrintWriter>();
+
+	/**
+	 * The appplication main method, which just listens on a port and
+	 * spawns handler threads.
+	 */
+	public static void main(String[] args) throws Exception {
+		System.out.println("The chat server is running.");//imprime en consola "The chat server is running."
+		ServerSocket listener = new ServerSocket(PORT);//declara el servidor listener
+		try {
+			while (true) {//si es verdader
+				new Handler(listener.accept()).start();//metodo Handler comienza y server accept
+			}
+		} finally {
+			listener.close();//finaliza servidor.
+		}
+	}
+
+	/**
+	 * A handler thread class.  Handlers are spawned from the listening
+	 * loop and are responsible for a dealing with a single client
+	 * and broadcasting its messages.
+	 */
+	private static class Handler extends Thread {// extends Thread para  redefinir el método run
+		private String name;
+		private Socket socket;//establecimiento de la conexión de red y del envío de datos a través de ella.
+		private BufferedReader in;// Para leer del teclado con el método readLine()
+		private PrintWriter out;//  Para poder mandar el string leido al cliente
+
+		/**
+		 * Constructs a handler thread, squirreling away the socket.
+		 * All the interesting work is done in the run method.
+		 */
+		public Handler(Socket socket) {//metodo Handler recibe el socket
+			this.socket = socket;//socket declarado a fuera del metodo es igual al socket recibido.
+		}
+		/**
+		 * Services this thread's client by repeatedly requesting a
+		 * screen name until a unique one has been submitted, then
+		 * acknowledges the name and registers the output stream for
+		 * the client in a global set, then repeatedly gets inputs and
+		 * broadcasts them.
+		 */
+		public void run() {//metodo run 
+			try {
+
+				// Create character streams for the socket.
+				in = new BufferedReader(new InputStreamReader(
+						socket.getInputStream()));     //lee el socket ingresado.                 
+				out = new PrintWriter(socket.getOutputStream(), true);//escribir datos en cliente.
+
+				// Request a name from this client.  Keep requesting until
+				// a name is submitted that is not already used.  Note that
+				// checking for the existence of a name and adding the name
+				// must be done while locking the set of names.
+				while (true) {//si es verdadero. 
+					out.println("SUBMITNAME");//escribir en cliente "SUBMITNAME"
+					name = in.readLine();//string name = leer in.
+					if (name == null) {//si name esta vacio
+						return;//regresa
+					}
+					synchronized (names) {//si no hay otro thread ejecutando algun bloque sincronizado con names,
+						if (!names.contains(name)) {//si no se tiene ese nombre 
+							names.add(name);//agregar el nombre.
+							break;
+						}
+					}
+				}
+
+				// Now that a successful name has been chosen, add the
+				// socket's print writer to the set of all writers so
+				// this client can receive broadcast messages.
+				out.println("NAMEACCEPTED");//escribir en clinete "NAMEACCEPTED"
+				writers.add(out);//agrega el escritor.
+
+				// Accept messages from this client and broadcast them.
+				// Ignore other clients that cannot be broadcasted to.
+				while (true) {
+					String input = in.readLine();//lee los datos de cliente
+					if (input == null) {//si es vacio
+						return;//regresa
+					}
+					for (PrintWriter writer : writers) {
+						writer.println("MESSAGE " + name + ": " + input);//envia el mensaje del cliente 
+					}
+				}
+			} catch (IOException e) {//en caso de error
+				System.out.println(e);//imprimir en consola el error 
+			} finally {
+				// This client is going down!  Remove its name and its print
+				// writer from the sets, and close its socket.
+				if (name != null) {
+					names.remove(name);
+				}
+				if (out != null) {
+					writers.remove(out);
+				}
+				try {
+					socket.close();
+				} catch (IOException e) {
+				}
+			}
+		}
+	}
+}
